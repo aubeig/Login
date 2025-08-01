@@ -1,19 +1,31 @@
-require('dotenv').config();
-const express = require('express');
-const session = require('express-session');
-const crypto = require('crypto');
-const path = require('fs');
-const TelegramBot = require('node-telegram-bot-api');
+import dotenv from 'dotenv';
+dotenv.config();
+
+import express from 'express';
+import session from 'express-session';
+import crypto from 'crypto';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import fs from 'fs';
+import TelegramBot from 'node-telegram-bot-api';
+
+// Получаем __dirname для ES-модулей
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 const app = express();
 const port = process.env.PORT || 3000;
 
-// --- Конфигурация Express ---
-const __dirname = path.resolve();
-app.set('view engine', 'ejs');
-app.set('views', path.join(__dirname, 'views'));
-app.use(express.static(path.join(__dirname, 'public')));
+// Конфигурация путей
+const viewsPath = join(__dirname, 'views');
+const publicPath = join(__dirname, 'public');
 
-// Генерация секрета для сессий
+// Проверка существования директорий
+console.log(`Project root: ${__dirname}`);
+console.log(`Views path: ${viewsPath}`);
+console.log(`Public path: ${publicPath}`);
+
+// Настройка сессий
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 app.use(session({
   secret: SESSION_SECRET,
@@ -25,43 +37,42 @@ app.use(session({
   }
 }));
 
-// --- Хранилище токенов (временное) ---
+// Настройка шаблонов и статических файлов
+app.set('view engine', 'ejs');
+app.set('views', viewsPath);
+app.use(express.static(publicPath));
+
+// Хранилище токенов
 const tokensStorage = new Map();
 
-// --- Telegram Bot ---
-const bot = new TelegramBot(process.env.BOT_TOKEN, {polling: true});
+// Telegram Bot
+const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   const username = msg.from.username;
   
   try {
-    // Генерация токена
     const token = crypto.randomBytes(20).toString('hex');
     tokensStorage.set(token, { username, chatId });
     
-    // Очистка токена через 10 минут
     setTimeout(() => {
       if (tokensStorage.has(token)) tokensStorage.delete(token);
     }, 600000);
     
-    // Отправка ссылки пользователю
     const loginLink = `${process.env.SERVER_URL}/login?token=${token}`;
-    bot.sendMessage(chatId, `🔑 Ваша персональная ссылка для входа: ${loginLink}\n\nСсылка действительна 10 минут`);
+    bot.sendMessage(chatId, `🔑 Ваша ссылка для входа: ${loginLink}\n\nДействует 10 минут`);
   } catch (error) {
     console.error('Ошибка генерации токена:', error);
     bot.sendMessage(chatId, '⚠️ Ошибка генерации ссылки. Попробуйте позже.');
   }
 });
 
-// --- Маршруты Express ---
-
-// Главная страница
+// Маршруты
 app.get('/', (req, res) => {
   res.render('index');
 });
 
-// Аутентификация
 app.get('/login', (req, res) => {
   const { token } = req.query;
   
@@ -77,7 +88,6 @@ app.get('/login', (req, res) => {
   res.status(401).render('error', { message: 'Недействительный или просроченный токен' });
 });
 
-// Профиль пользователя
 app.get('/profile', (req, res) => {
   if (req.session.authenticated) {
     return res.render('profile', { 
@@ -87,19 +97,13 @@ app.get('/profile', (req, res) => {
   res.redirect('/');
 });
 
-// Выход
 app.get('/logout', (req, res) => {
   req.session.destroy(err => {
     res.redirect('/');
   });
 });
 
-// --- Запуск сервера ---
 app.listen(port, () => {
-  console.log(`Сервер и Telegram бот запущены на порту ${port}`);
+  console.log(`Сервер и бот запущены на порту ${port}`);
   console.log(`Режим: ${process.env.NODE_ENV || 'development'}`);
-  
-  // Для отладки
-  console.log('Директория views:', path.join(__dirname, 'views'));
-  console.log('Директория public:', path.join(__dirname, 'public'));
 });
