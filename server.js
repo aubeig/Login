@@ -9,94 +9,128 @@ import { dirname, join } from 'path';
 import fs from 'fs';
 import TelegramBot from 'node-telegram-bot-api';
 
-// Получаем __dirname для ES-модулей
+// Получаем абсолютные пути
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Конфигурация путей
-const viewsPath = join(__dirname, 'views');
-const publicPath = join(__dirname, 'public');
+// Проверка существования критически важных директорий
+const requiredDirs = [
+  join(__dirname, 'views'),
+  join(__dirname, 'public'),
+  join(__dirname, 'public', 'css')
+];
 
-// Проверка существования директорий
-console.log(`Project root: ${__dirname}`);
-console.log(`Views path: ${viewsPath}`);
-console.log(`Public path: ${publicPath}`);
+requiredDirs.forEach(dir => {
+  try {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+      console.log(`Created directory: ${dir}`);
+    }
+  } catch (err) {
+    console.error(`Error creating directory ${dir}:`, err);
+  }
+});
 
-// Проверка содержимого директорий
-try {
-  console.log('Files in views:', fs.readdirSync(viewsPath));
-} catch (err) {
-  console.error('Error reading views directory:', err);
+// Создаем файл error.ejs, если он отсутствует
+const errorEjsPath = join(__dirname, 'views', 'error.ejs');
+if (!fs.existsSync(errorEjsPath)) {
+  const errorEjsContent = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Ошибка</title>
+  <style>
+    body { background: #121212; color: #e0d6eb; font-family: sans-serif; text-align: center; padding: 50px; }
+    h1 { color: #ff5555; }
+    p { max-width: 600px; margin: 20px auto; }
+  </style>
+</head>
+<body>
+  <h1>Ошибка</h1>
+  <p><%= message %></p>
+  <a href="/">Вернуться на главную</a>
+</body>
+</html>`;
+  
+  fs.writeFileSync(errorEjsPath, errorEjsContent);
+  console.log('Created default error.ejs file');
 }
 
-try {
-  console.log('Files in public:', fs.readdirSync(publicPath));
-} catch (err) {
-  console.error('Error reading public directory:', err);
+// Создаем файл style.css, если он отсутствует
+const styleCssPath = join(__dirname, 'public', 'css', 'style.css');
+if (!fs.existsSync(styleCssPath)) {
+  const styleCssContent = `body {
+    background: #121212;
+    color: #e0d6eb;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 20px;
+  }
+  
+  .container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+  }`;
+  
+  fs.writeFileSync(styleCssPath, styleCssContent);
+  console.log('Created default style.css file');
 }
 
-// Настройка сессий
-const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+// Настройка Express
 app.use(session({
-  secret: SESSION_SECRET,
+  secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
   resave: false,
   saveUninitialized: true,
-  cookie: { 
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 24 * 60 * 60 * 1000
-  }
+  cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 }
 }));
 
-// Настройка шаблонов и статических файлов
 app.set('view engine', 'ejs');
-app.set('views', viewsPath);
-app.use(express.static(publicPath));
+app.set('views', join(__dirname, 'views'));
+app.use(express.static(join(__dirname, 'public')));
 
 // Хранилище токенов
 const tokensStorage = new Map();
 
-// Telegram Bot - используем вебхуки вместо polling
-const bot = new TelegramBot(process.env.BOT_TOKEN);
+// Telegram Bot - используем polling с защитой от дублирования
+let botInstance = null;
 
-// Установка вебхука
-const webhookUrl = `${process.env.SERVER_URL}/bot${process.env.BOT_TOKEN}`;
-bot.setWebHook(webhookUrl)
-  .then(() => console.log(`Webhook set to: ${webhookUrl}`))
-  .catch(err => console.error('Error setting webhook:', err));
-
-// Обработка запросов от Telegram
-app.post(`/bot${process.env.BOT_TOKEN}`, express.json(), (req, res) => {
-  bot.processUpdate(req.body);
-  res.sendStatus(200);
-});
-
-// Обработчик команды /start
-bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
-  const username = msg.from.username;
-  
-  try {
-    const token = crypto.randomBytes(20).toString('hex');
-    tokensStorage.set(token, { username, chatId });
+const initBot = () => {
+  if (!botInstance) {
+    botInstance = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
     
-    setTimeout(() => {
-      if (tokensStorage.has(token)) tokensStorage.delete(token);
-    }, 600000);
+    botInstance.onText(/\/start/, (msg) => {
+      const chatId = msg.chat.id;
+      const username = msg.from.username;
+      
+      try {
+        const token = crypto.randomBytes(20).toString('hex');
+        tokensStorage.set(token, { username, chatId });
+        
+        setTimeout(() => {
+          if (tokensStorage.has(token)) tokensStorage.delete(token);
+        }, 600000);
+        
+        let baseUrl = process.env.SERVER_URL;
+        if (!baseUrl.endsWith('/')) baseUrl += '/';
+        const loginLink = `${baseUrl}login?token=${token}`;
+        
+        botInstance.sendMessage(chatId, `🔑 Ваша ссылка для входа: ${loginLink}`);
+      } catch (error) {
+        console.error('Ошибка генерации токена:', error);
+        botInstance.sendMessage(chatId, '⚠️ Ошибка генерации ссылки. Попробуйте позже.');
+      }
+    });
     
-    // Формирование ссылки
-    let baseUrl = process.env.SERVER_URL;
-    if (!baseUrl.endsWith('/')) baseUrl += '/';
-    const loginLink = `${baseUrl}login?token=${token}`;
-    
-    bot.sendMessage(chatId, `🔑 Ваша персональная ссылка для входа: ${loginLink}\n\nСсылка действительна 10 минут`);
-  } catch (error) {
-    console.error('Ошибка генерации токена:', error);
-    bot.sendMessage(chatId, '⚠️ Ошибка генерации ссылки. Попробуйте позже.');
+    console.log('Telegram bot initialized');
   }
-});
+  return botInstance;
+};
+
+// Инициализируем бота после небольшой задержки
+setTimeout(initBot, 5000);
 
 // Маршруты
 app.get('/', (req, res) => {
@@ -133,19 +167,22 @@ app.get('/logout', (req, res) => {
   });
 });
 
-// Простые текстовые обработчики ошибок на случай если error.ejs недоступен
+// Упрощенные обработчики ошибок
 app.use((req, res) => {
-  res.status(404).send('Страница не найдена');
+  res.status(404).render('error', { message: 'Страница не найдена' });
 });
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).send('Внутренняя ошибка сервера');
+  res.status(500).render('error', { message: 'Внутренняя ошибка сервера' });
 });
 
 app.listen(port, () => {
   console.log(`Сервер запущен на порту ${port}`);
   console.log(`Режим: ${process.env.NODE_ENV || 'development'}`);
   console.log(`SERVER_URL: ${process.env.SERVER_URL}`);
-  console.log(`Webhook URL: ${webhookUrl}`);
+  console.log('Проверка файлов:');
+  console.log('Views:', fs.readdirSync(join(__dirname, 'views')));
+  console.log('Public:', fs.readdirSync(join(__dirname, 'public')));
+  console.log('Public/css:', fs.readdirSync(join(__dirname, 'public', 'css')));
 });
