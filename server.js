@@ -60,8 +60,12 @@ bot.onText(/\/start/, (msg) => {
       if (tokensStorage.has(token)) tokensStorage.delete(token);
     }, 600000);
     
-    const loginLink = `${process.env.SERVER_URL}/login?token=${token}`;
-    bot.sendMessage(chatId, `🔑 Ваша ссылка для входа: ${loginLink}\n\nДействует 10 минут`);
+    // Исправление двойного слеша в URL
+    let baseUrl = process.env.SERVER_URL;
+    if (!baseUrl.endsWith('/')) baseUrl += '/';
+    const loginLink = `${baseUrl}login?token=${token}`;
+    
+    bot.sendMessage(chatId, `🔑 Ваша персональная ссылка для входа: ${loginLink}\n\nСсылка действительна 10 минут`);
   } catch (error) {
     console.error('Ошибка генерации токена:', error);
     bot.sendMessage(chatId, '⚠️ Ошибка генерации ссылки. Попробуйте позже.');
@@ -103,7 +107,19 @@ app.get('/logout', (req, res) => {
   });
 });
 
+// Обработка 404
+app.use((req, res) => {
+  res.status(404).render('error', { message: 'Страница не найдена' });
+});
+
+// Обработка ошибок
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).render('error', { message: 'Внутренняя ошибка сервера' });
+});
+
 app.listen(port, () => {
   console.log(`Сервер и бот запущены на порту ${port}`);
   console.log(`Режим: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`SERVER_URL: ${process.env.SERVER_URL}`);
 });
