@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Профиль</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM16.64 8.8C16.49 10.38 15.84 14.22 15.51 15.99C15.37 16.74 15.09 16.99 14.83 17.02C14.25 17.07 13.81 16.64 13.25 16.27C12.37 15.69 11.87 15.33 11.02 14.77C10.03 14.11 10.67 13.76 11.24 13.18C11.39 13.03 13.95 10.7 14 10.49C14.0069 10.4582 14.006 10.4252 13.9973 10.3937C13.9886 10.3622 13.9723 10.3332 13.95 10.309C13.89 10.259 13.81 10.279 13.75 10.289C13.68 10.3 12.25 11.32 9.52 13.29C9.12 13.57 8.76 13.71 8.44 13.7C8.08 13.69 7.4 13.49 6.89 13.32C6.26 13.12 5.77 13.01 5.81 12.61C5.83 12.42 6.08 12.23 6.55 12.03C9.47 10.58 11.41 9.68 12.38 9.34C15.16 8.23 15.73 8.03 16.11 8.03C16.19 8.03 16.38 8.05 16.5 8.15C16.61 8.25 16.63 8.36 16.64 8.43C16.63 8.49 16.64 8.66 16.64 8.8Z" fill="white"/>
+        </svg>
+      </div>
+      <h1>Ваш профиль</h1>
+    </div>
+    
+    <div class="success-message">✓ Успешный вход в систему</div>
+    
+    <div class="user-info">
+      <div class="user-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path d="M12 12C14.21 12 16 10.21 16 8C16 5.79 14.21 4 12 4C9.79 4 8 5.79 8 8C8 10.21 9.79 12 12 12ZM12 14C9.33 14 4 15.34 4 18V20H20V18C20 15.34 14.67 14 12 14Z" fill="white"/>
+        </svg>
+      </div>
+      <div class="username">@<%= username %></div>
+    </div>
+    
+    <p class="welcome-text">Добро пожаловать в систему! Вы вошли через Telegram.</p>
+    
+    <a href="/logout" class="btn logout-btn">Выйти из системы</a>
+  </div>
+</body>
+</html>

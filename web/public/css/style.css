@@ -1,0 +1,211 @@
+:root {
+  --dark-bg: #121212;
+  --card-bg: #1e1e1e;
+  --accent: #6a0dad;
+  --accent-dark: #5a0a9d;
+  --text: #e0d6eb;
+  --text-secondary: #b19cd9;
+  --success: #4caf50;
+  --error: #f44336;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+::selection {
+  background: var(--accent);
+  color: white;
+}
+
+body {
+  background: var(--dark-bg);
+  background-image: 
+    radial-gradient(circle at 10% 20%, rgba(106, 13, 173, 0.1) 0%, transparent 40%),
+    radial-gradient(circle at 90% 80%, rgba(106, 13, 173, 0.1) 0%, transparent 40%);
+  color: var(--text);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow-x: hidden;
+}
+
+.container {
+  background: var(--card-bg);
+  border-radius: 20px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 500px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(106, 13, 173, 0.3);
+  transform: translateY(0);
+  transition: transform 0.4s ease, box-shadow 0.4s ease;
+  animation: fadeIn 0.8s ease-out forwards;
+  opacity: 0;
+}
+
+@keyframes fadeIn {
+  to { opacity: 1; }
+}
+
+.container:hover {
+  transform: translateY(-10px);
+  box-shadow: 0 15px 35px rgba(106, 13, 173, 0.3);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.logo {
+  width: 50px;
+  height: 50px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 15px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+h1 {
+  font-size: 1.8rem;
+  background: linear-gradient(to right, var(--text), var(--text-secondary));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: 1px;
+}
+
+p {
+  line-height: 1.6;
+  margin: 1rem 0;
+  color: var(--text-secondary);
+}
+
+.btn {
+  background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+  color: white;
+  border: none;
+  padding: 15px 30px;
+  font-size: 1.1rem;
+  border-radius: 50px;
+  cursor: pointer;
+  margin-top: 1.5rem;
+  transition: all 0.3s ease;
+  display: block;
+  width: 100%;
+  text-align: center;
+  text-decoration: none;
+  letter-spacing: 1.5px;
+  font-weight: 600;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -60%;
+  width: 20px;
+  height: 200%;
+  background: rgba(255, 255, 255, 0.3);
+  transform: rotate(25deg);
+  transition: all 0.7s;
+}
+
+.btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 5px 15px rgba(106, 13, 173, 0.4);
+}
+
+.btn:hover::after {
+  left: 120%;
+}
+
+.logout-btn {
+  background: linear-gradient(135deg, #333, #222);
+  margin-top: 2rem;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  padding: 1rem;
+  background: rgba(106, 13, 173, 0.1);
+  border-radius: 15px;
+  margin-top: 1.5rem;
+  animation: slideIn 0.6s ease-out forwards;
+  opacity: 0;
+}
+
+@keyframes slideIn {
+  from { transform: translateX(-50px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.user-icon {
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 15px;
+}
+
+.username {
+  font-size: 1.3rem;
+  font-weight: 500;
+}
+
+.success-message {
+  color: var(--success);
+  text-align: center;
+  margin: 1.5rem 0;
+  font-size: 1.2rem;
+  animation: fadeIn 1s ease-in forwards;
+  opacity: 0;
+}
+
+.welcome-text {
+  text-align: center;
+  margin-top: 2rem;
+  color: var(--text-secondary);
+  animation: fadeIn 1.2s ease-in forwards;
+  opacity: 0;
+}
+
+@media (max-width: 600px) {
+  .container {
+    padding: 1.5rem;
+  }
+  
+  h1 {
+    font-size: 1.5rem;
+  }
+  
+  .btn {
+    padding: 12px 20px;
+    font-size: 1rem;
+  }
+}
