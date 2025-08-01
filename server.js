@@ -3,146 +3,55 @@ dotenv.config();
 
 import express from 'express';
 import session from 'express-session';
+import pgSession from 'connect-pg-simple';
+import { Pool } from 'pg';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
 import TelegramBot from 'node-telegram-bot-api';
 
-// Получаем абсолютные пути
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// 1. Гарантируем существование всех директорий
-const requiredDirs = [
-  join(__dirname, 'views'),
-  join(__dirname, 'public'),
-  join(__dirname, 'public', 'css')
-];
-
-requiredDirs.forEach(dir => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-    console.log(`Created directory: ${dir}`);
-  }
+// Подключение к PostgreSQL
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
-// 2. Создаем обязательные файлы, если они отсутствуют
-const createFileIfMissing = (path, content) => {
-  if (!fs.existsSync(path)) {
-    fs.writeFileSync(path, content);
-    console.log(`Created file: ${path}`);
-  }
-};
-
-// Файлы и их содержимое
-const filesToCreate = {
-  [join(__dirname, 'views', 'index.ejs')]: `<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Telegram Auth</title>
-  <link rel="stylesheet" href="/css/style.css">
-</head>
-<body>
-  <div class="container">
-    <h1>Telegram Авторизация</h1>
-    <p>Для входа получите ссылку в Telegram боте</p>
-    <p>Бот: @<%= process.env.BOT_USERNAME || 'ваш_бот' %></p>
-  </div>
-</body>
-</html>`,
-  
-  [join(__dirname, 'views', 'profile.ejs')]: `<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Профиль</title>
-  <link rel="stylesheet" href="/css/style.css">
-</head>
-<body>
-  <div class="container">
-    <h1>Ваш профиль</h1>
-    <p>Добро пожаловать, @<%= username %>!</p>
-    <a href="/logout">Выйти</a>
-  </div>
-</body>
-</html>`,
-  
-  [join(__dirname, 'views', 'error.ejs')]: `<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ошибка</title>
-  <link rel="stylesheet" href="/css/style.css">
-</head>
-<body>
-  <div class="container">
-    <h1>Ошибка</h1>
-    <p><%= message %></p>
-    <a href="/">На главную</a>
-  </div>
-</body>
-</html>`,
-  
-  [join(__dirname, 'public', 'css', 'style.css')]: `:root {
-  --dark-bg: #121212;
-  --card-bg: #1e1e1e;
-  --accent: #6a0dad;
-  --text: #e0d6eb;
-}
-
-body {
-  background: var(--dark-bg);
-  color: var(--text);
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  margin: 0;
-  padding: 20px;
-}
-
-.container {
-  background: var(--card-bg);
-  border-radius: 10px;
-  padding: 30px;
-  max-width: 800px;
-  margin: 40px auto;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-}
-
-h1 {
-  color: #b19cd9;
-  margin-top: 0;
-}
-
-a {
-  color: var(--accent);
-  text-decoration: none;
-}
-
-a:hover {
-  text-decoration: underline;
-}`
-};
-
-// Создаем все файлы
-Object.entries(filesToCreate).forEach(([path, content]) => {
-  createFileIfMissing(path, content);
+const PgStore = pgSession(session);
+const sessionStore = new PgStore({
+  pool,
+  tableName: 'user_sessions',
+  createTableIfMissing: true
 });
 
-// 3. Настройка Express
+// Создаем таблицу для токенов
+pool.query(`
+  CREATE TABLE IF NOT EXISTS auth_tokens (
+    token TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    chat_id BIGINT NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW()
+  );
+`).catch(err => console.error('Error creating tokens table:', err));
+
+// Настройка Express
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 app.use(session({
+  store: sessionStore,
   secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
   resave: false,
-  saveUninitialized: true,
-  cookie: { 
+  saveUninitialized: false,
+  cookie: {
     secure: process.env.NODE_ENV === 'production',
-    maxAge: 24 * 60 * 60 * 1000
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 1 неделя
   }
 }));
 
@@ -150,98 +59,106 @@ app.set('view engine', 'ejs');
 app.set('views', join(__dirname, 'views'));
 app.use(express.static(join(__dirname, 'public')));
 
-// 4. Хранилище токенов
-const tokensStorage = new Map();
+// Telegram Bot
+const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
-// 5. Telegram Bot - безопасная инициализация
-let bot = null;
-
-const initBot = () => {
+bot.onText(/\/start/, async (msg) => {
+  const chatId = msg.chat.id;
+  const username = msg.from.username || 'user';
+  
   try {
-    bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+    const token = crypto.randomBytes(20).toString('hex');
     
-    bot.onText(/\/start/, (msg) => {
-      const chatId = msg.chat.id;
-      const username = msg.from.username;
-      
-      try {
-        const token = crypto.randomBytes(20).toString('hex');
-        tokensStorage.set(token, { username, chatId });
-        
-        setTimeout(() => {
-          if (tokensStorage.has(token)) tokensStorage.delete(token);
-        }, 600000);
-        
-        let baseUrl = process.env.SERVER_URL;
-        if (!baseUrl.endsWith('/')) baseUrl += '/';
-        const loginLink = `${baseUrl}login?token=${token}`;
-        
-        bot.sendMessage(chatId, `🔑 Ваша ссылка для входа: ${loginLink}`);
-      } catch (error) {
-        console.error('Ошибка генерации токена:', error);
-        bot.sendMessage(chatId, '⚠️ Ошибка генерации ссылки. Попробуйте позже.');
-      }
-    });
+    // Сохраняем токен в PostgreSQL
+    await pool.query(
+      'INSERT INTO auth_tokens (token, username, chat_id) VALUES ($1, $2, $3)',
+      [token, username, chatId]
+    );
     
-    console.log('Telegram bot initialized successfully');
-    return true;
+    // Формирование ссылки
+    let baseUrl = process.env.SERVER_URL;
+    if (!baseUrl.endsWith('/')) baseUrl += '/';
+    const loginLink = `${baseUrl}login?token=${token}`;
+    
+    // Отправка красивого сообщения
+    bot.sendMessage(chatId, `
+🔑 <b>Ваша ссылка для входа</b>
+
+✨ Используйте эту ссылку для входа в систему:
+${loginLink}
+
+⌛ Ссылка действительна 10 минут
+    `, { parse_mode: 'HTML' });
   } catch (error) {
-    console.error('Bot initialization failed:', error);
-    return false;
+    console.error('Ошибка генерации токена:', error);
+    bot.sendMessage(chatId, '⚠️ <b>Ошибка генерации ссылки</b>\nПопробуйте позже', { parse_mode: 'HTML' });
   }
-};
+});
 
-// Пытаемся инициализировать бота с повторными попытками
-const initBotWithRetry = (attempt = 1, maxAttempts = 5) => {
-  if (attempt > maxAttempts) {
-    console.error('Failed to initialize bot after multiple attempts');
-    return;
-  }
-  
-  console.log(`Initializing bot (attempt ${attempt}/${maxAttempts})...`);
-  
-  if (initBot()) {
-    console.log('Bot initialized successfully');
-  } else {
-    console.log(`Retrying in ${attempt * 2} seconds...`);
-    setTimeout(() => initBotWithRetry(attempt + 1, maxAttempts), attempt * 2000);
-  }
-};
-
-// Запускаем инициализацию бота с задержкой
-setTimeout(() => initBotWithRetry(), 3000);
-
-// 6. Маршруты
+// Маршруты
 app.get('/', (req, res) => {
-  // Передаем имя бота в шаблон
   res.render('index', { 
-    process: {
-      env: {
-        BOT_USERNAME: process.env.BOT_USERNAME
-      }
-    }
+    botUsername: process.env.BOT_USERNAME,
+    session: req.session 
   });
 });
 
-app.get('/login', (req, res) => {
+app.get('/login', async (req, res) => {
   const { token } = req.query;
   
-  if (token && tokensStorage.has(token)) {
-    const userData = tokensStorage.get(token);
-    tokensStorage.delete(token);
-    
-    req.session.authenticated = true;
-    req.session.username = userData.username;
-    return res.redirect('/profile');
+  if (!token) {
+    return res.status(401).render('error', { 
+      message: 'Токен не предоставлен',
+      session: req.session 
+    });
   }
   
-  res.status(401).render('error', { message: 'Недействительный или просроченный токен' });
+  try {
+    // Проверяем токен в базе данных
+    const result = await pool.query(
+      `DELETE FROM auth_tokens 
+       WHERE token = $1 
+       RETURNING username, chat_id, created_at`,
+      [token]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(401).render('error', { 
+        message: 'Недействительный или просроченный токен',
+        session: req.session 
+      });
+    }
+    
+    const userData = result.rows[0];
+    const tokenAge = (Date.now() - new Date(userData.created_at).getTime()) / 60000;
+    
+    if (tokenAge > 10) {
+      return res.status(401).render('error', { 
+        message: 'Токен просрочен',
+        session: req.session 
+      });
+    }
+    
+    // Устанавливаем сессию
+    req.session.authenticated = true;
+    req.session.username = userData.username;
+    
+    // Перенаправляем в профиль
+    return res.redirect('/profile');
+  } catch (error) {
+    console.error('Ошибка аутентификации:', error);
+    res.status(500).render('error', { 
+      message: 'Внутренняя ошибка сервера',
+      session: req.session 
+    });
+  }
 });
 
 app.get('/profile', (req, res) => {
   if (req.session.authenticated) {
     return res.render('profile', { 
-      username: req.session.username 
+      username: req.session.username,
+      session: req.session 
     });
   }
   res.redirect('/');
@@ -253,32 +170,16 @@ app.get('/logout', (req, res) => {
   });
 });
 
-// 7. Обработка ошибок
-app.use((req, res) => {
-  res.status(404).render('error', { message: 'Страница не найдена' });
-});
-
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).render('error', { message: 'Внутренняя ошибка сервера' });
-});
-
-// 8. Запуск сервера
-app.listen(port, () => {
+app.listen(port, async () => {
   console.log(`Сервер запущен на порту ${port}`);
   console.log(`Режим: ${process.env.NODE_ENV || 'development'}`);
   console.log(`SERVER_URL: ${process.env.SERVER_URL}`);
   
-  // Выводим список файлов для диагностики
-  console.log('\nДиректория views:');
-  fs.readdirSync(join(__dirname, 'views')).forEach(file => {
-    console.log(`- ${file}`);
-  });
-  
-  console.log('\nДиректория public/css:');
-  fs.readdirSync(join(__dirname, 'public', 'css')).forEach(file => {
-    console.log(`- ${file}`);
-  });
-  
-  console.log('\nГотов к работе!');
+  // Проверка подключения к БД
+  try {
+    await pool.query('SELECT NOW()');
+    console.log('PostgreSQL connected successfully');
+  } catch (err) {
+    console.error('PostgreSQL connection error:', err);
+  }
 });
