@@ -25,6 +25,19 @@ console.log(`Project root: ${__dirname}`);
 console.log(`Views path: ${viewsPath}`);
 console.log(`Public path: ${publicPath}`);
 
+// Проверка содержимого директорий
+try {
+  console.log('Files in views:', fs.readdirSync(viewsPath));
+} catch (err) {
+  console.error('Error reading views directory:', err);
+}
+
+try {
+  console.log('Files in public:', fs.readdirSync(publicPath));
+} catch (err) {
+  console.error('Error reading public directory:', err);
+}
+
 // Настройка сессий
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 app.use(session({
@@ -45,9 +58,22 @@ app.use(express.static(publicPath));
 // Хранилище токенов
 const tokensStorage = new Map();
 
-// Telegram Bot
-const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+// Telegram Bot - используем вебхуки вместо polling
+const bot = new TelegramBot(process.env.BOT_TOKEN);
 
+// Установка вебхука
+const webhookUrl = `${process.env.SERVER_URL}/bot${process.env.BOT_TOKEN}`;
+bot.setWebHook(webhookUrl)
+  .then(() => console.log(`Webhook set to: ${webhookUrl}`))
+  .catch(err => console.error('Error setting webhook:', err));
+
+// Обработка запросов от Telegram
+app.post(`/bot${process.env.BOT_TOKEN}`, express.json(), (req, res) => {
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
+});
+
+// Обработчик команды /start
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   const username = msg.from.username;
@@ -60,7 +86,7 @@ bot.onText(/\/start/, (msg) => {
       if (tokensStorage.has(token)) tokensStorage.delete(token);
     }, 600000);
     
-    // Исправление двойного слеша в URL
+    // Формирование ссылки
     let baseUrl = process.env.SERVER_URL;
     if (!baseUrl.endsWith('/')) baseUrl += '/';
     const loginLink = `${baseUrl}login?token=${token}`;
@@ -107,19 +133,19 @@ app.get('/logout', (req, res) => {
   });
 });
 
-// Обработка 404
+// Простые текстовые обработчики ошибок на случай если error.ejs недоступен
 app.use((req, res) => {
-  res.status(404).render('error', { message: 'Страница не найдена' });
+  res.status(404).send('Страница не найдена');
 });
 
-// Обработка ошибок
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).render('error', { message: 'Внутренняя ошибка сервера' });
+  res.status(500).send('Внутренняя ошибка сервера');
 });
 
 app.listen(port, () => {
-  console.log(`Сервер и бот запущены на порту ${port}`);
+  console.log(`Сервер запущен на порту ${port}`);
   console.log(`Режим: ${process.env.NODE_ENV || 'development'}`);
   console.log(`SERVER_URL: ${process.env.SERVER_URL}`);
+  console.log(`Webhook URL: ${webhookUrl}`);
 });
