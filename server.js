@@ -16,7 +16,7 @@ const __dirname = dirname(__filename);
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Проверка существования критически важных директорий
+// 1. Гарантируем существование всех директорий
 const requiredDirs = [
   join(__dirname, 'views'),
   join(__dirname, 'public'),
@@ -24,84 +24,143 @@ const requiredDirs = [
 ];
 
 requiredDirs.forEach(dir => {
-  try {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-      console.log(`Created directory: ${dir}`);
-    }
-  } catch (err) {
-    console.error(`Error creating directory ${dir}:`, err);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+    console.log(`Created directory: ${dir}`);
   }
 });
 
-// Создаем файл error.ejs, если он отсутствует
-const errorEjsPath = join(__dirname, 'views', 'error.ejs');
-if (!fs.existsSync(errorEjsPath)) {
-  const errorEjsContent = `<!DOCTYPE html>
-<html>
+// 2. Создаем обязательные файлы, если они отсутствуют
+const createFileIfMissing = (path, content) => {
+  if (!fs.existsSync(path)) {
+    fs.writeFileSync(path, content);
+    console.log(`Created file: ${path}`);
+  }
+};
+
+// Файлы и их содержимое
+const filesToCreate = {
+  [join(__dirname, 'views', 'index.ejs')]: `<!DOCTYPE html>
+<html lang="ru">
 <head>
-  <title>Ошибка</title>
-  <style>
-    body { background: #121212; color: #e0d6eb; font-family: sans-serif; text-align: center; padding: 50px; }
-    h1 { color: #ff5555; }
-    p { max-width: 600px; margin: 20px auto; }
-  </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Telegram Auth</title>
+  <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <h1>Ошибка</h1>
-  <p><%= message %></p>
-  <a href="/">Вернуться на главную</a>
+  <div class="container">
+    <h1>Telegram Авторизация</h1>
+    <p>Для входа получите ссылку в Telegram боте</p>
+    <p>Бот: @<%= process.env.BOT_USERNAME || 'ваш_бот' %></p>
+  </div>
 </body>
-</html>`;
+</html>`,
   
-  fs.writeFileSync(errorEjsPath, errorEjsContent);
-  console.log('Created default error.ejs file');
+  [join(__dirname, 'views', 'profile.ejs')]: `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Профиль</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Ваш профиль</h1>
+    <p>Добро пожаловать, @<%= username %>!</p>
+    <a href="/logout">Выйти</a>
+  </div>
+</body>
+</html>`,
+  
+  [join(__dirname, 'views', 'error.ejs')]: `<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ошибка</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Ошибка</h1>
+    <p><%= message %></p>
+    <a href="/">На главную</a>
+  </div>
+</body>
+</html>`,
+  
+  [join(__dirname, 'public', 'css', 'style.css')]: `:root {
+  --dark-bg: #121212;
+  --card-bg: #1e1e1e;
+  --accent: #6a0dad;
+  --text: #e0d6eb;
 }
 
-// Создаем файл style.css, если он отсутствует
-const styleCssPath = join(__dirname, 'public', 'css', 'style.css');
-if (!fs.existsSync(styleCssPath)) {
-  const styleCssContent = `body {
-    background: #121212;
-    color: #e0d6eb;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    margin: 0;
-    padding: 20px;
-  }
-  
-  .container {
-    max-width: 800px;
-    margin: 0 auto;
-    padding: 20px;
-  }`;
-  
-  fs.writeFileSync(styleCssPath, styleCssContent);
-  console.log('Created default style.css file');
+body {
+  background: var(--dark-bg);
+  color: var(--text);
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  margin: 0;
+  padding: 20px;
 }
 
-// Настройка Express
+.container {
+  background: var(--card-bg);
+  border-radius: 10px;
+  padding: 30px;
+  max-width: 800px;
+  margin: 40px auto;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+h1 {
+  color: #b19cd9;
+  margin-top: 0;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}`
+};
+
+// Создаем все файлы
+Object.entries(filesToCreate).forEach(([path, content]) => {
+  createFileIfMissing(path, content);
+});
+
+// 3. Настройка Express
 app.use(session({
   secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
   resave: false,
   saveUninitialized: true,
-  cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 }
+  cookie: { 
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 24 * 60 * 60 * 1000
+  }
 }));
 
 app.set('view engine', 'ejs');
 app.set('views', join(__dirname, 'views'));
 app.use(express.static(join(__dirname, 'public')));
 
-// Хранилище токенов
+// 4. Хранилище токенов
 const tokensStorage = new Map();
 
-// Telegram Bot - используем polling с защитой от дублирования
-let botInstance = null;
+// 5. Telegram Bot - безопасная инициализация
+let bot = null;
 
 const initBot = () => {
-  if (!botInstance) {
-    botInstance = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+  try {
+    bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
     
-    botInstance.onText(/\/start/, (msg) => {
+    bot.onText(/\/start/, (msg) => {
       const chatId = msg.chat.id;
       const username = msg.from.username;
       
@@ -117,24 +176,51 @@ const initBot = () => {
         if (!baseUrl.endsWith('/')) baseUrl += '/';
         const loginLink = `${baseUrl}login?token=${token}`;
         
-        botInstance.sendMessage(chatId, `🔑 Ваша ссылка для входа: ${loginLink}`);
+        bot.sendMessage(chatId, `🔑 Ваша ссылка для входа: ${loginLink}`);
       } catch (error) {
         console.error('Ошибка генерации токена:', error);
-        botInstance.sendMessage(chatId, '⚠️ Ошибка генерации ссылки. Попробуйте позже.');
+        bot.sendMessage(chatId, '⚠️ Ошибка генерации ссылки. Попробуйте позже.');
       }
     });
     
-    console.log('Telegram bot initialized');
+    console.log('Telegram bot initialized successfully');
+    return true;
+  } catch (error) {
+    console.error('Bot initialization failed:', error);
+    return false;
   }
-  return botInstance;
 };
 
-// Инициализируем бота после небольшой задержки
-setTimeout(initBot, 5000);
+// Пытаемся инициализировать бота с повторными попытками
+const initBotWithRetry = (attempt = 1, maxAttempts = 5) => {
+  if (attempt > maxAttempts) {
+    console.error('Failed to initialize bot after multiple attempts');
+    return;
+  }
+  
+  console.log(`Initializing bot (attempt ${attempt}/${maxAttempts})...`);
+  
+  if (initBot()) {
+    console.log('Bot initialized successfully');
+  } else {
+    console.log(`Retrying in ${attempt * 2} seconds...`);
+    setTimeout(() => initBotWithRetry(attempt + 1, maxAttempts), attempt * 2000);
+  }
+};
 
-// Маршруты
+// Запускаем инициализацию бота с задержкой
+setTimeout(() => initBotWithRetry(), 3000);
+
+// 6. Маршруты
 app.get('/', (req, res) => {
-  res.render('index');
+  // Передаем имя бота в шаблон
+  res.render('index', { 
+    process: {
+      env: {
+        BOT_USERNAME: process.env.BOT_USERNAME
+      }
+    }
+  });
 });
 
 app.get('/login', (req, res) => {
@@ -167,7 +253,7 @@ app.get('/logout', (req, res) => {
   });
 });
 
-// Упрощенные обработчики ошибок
+// 7. Обработка ошибок
 app.use((req, res) => {
   res.status(404).render('error', { message: 'Страница не найдена' });
 });
@@ -177,12 +263,22 @@ app.use((err, req, res, next) => {
   res.status(500).render('error', { message: 'Внутренняя ошибка сервера' });
 });
 
+// 8. Запуск сервера
 app.listen(port, () => {
   console.log(`Сервер запущен на порту ${port}`);
   console.log(`Режим: ${process.env.NODE_ENV || 'development'}`);
   console.log(`SERVER_URL: ${process.env.SERVER_URL}`);
-  console.log('Проверка файлов:');
-  console.log('Views:', fs.readdirSync(join(__dirname, 'views')));
-  console.log('Public:', fs.readdirSync(join(__dirname, 'public')));
-  console.log('Public/css:', fs.readdirSync(join(__dirname, 'public', 'css')));
+  
+  // Выводим список файлов для диагностики
+  console.log('\nДиректория views:');
+  fs.readdirSync(join(__dirname, 'views')).forEach(file => {
+    console.log(`- ${file}`);
+  });
+  
+  console.log('\nДиректория public/css:');
+  fs.readdirSync(join(__dirname, 'public', 'css')).forEach(file => {
+    console.log(`- ${file}`);
+  });
+  
+  console.log('\nГотов к работе!');
 });
