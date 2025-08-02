@@ -3,13 +3,12 @@ dotenv.config();
 
 import express from 'express';
 import session from 'express-session';
-import pgSession from 'connect-pg-simple';
-import { Pool } from 'pg';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
 import TelegramBot from 'node-telegram-bot-api';
+import { Pool } from 'pg';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -23,29 +22,45 @@ const pool = new Pool({
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
-const PgStore = pgSession(session);
-const sessionStore = new PgStore({
-  pool,
-  tableName: 'user_sessions',
-  createTableIfMissing: true
-});
-
 // Создаем таблицу для токенов
-pool.query(`
-  CREATE TABLE IF NOT EXISTS auth_tokens (
-    token TEXT PRIMARY KEY,
-    username TEXT NOT NULL,
-    chat_id BIGINT NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW()
-  );
-`).catch(err => console.error('Error creating tokens table:', err));
+(async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS auth_tokens (
+        token TEXT PRIMARY KEY,
+        username TEXT NOT NULL,
+        chat_id BIGINT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+    console.log('Auth tokens table created or exists');
+    
+    // Автоматическое удаление старых токенов
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION delete_old_tokens()
+      RETURNS TRIGGER AS $$
+      BEGIN
+        DELETE FROM auth_tokens WHERE created_at < NOW() - INTERVAL '10 minutes';
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+
+      DROP TRIGGER IF EXISTS tokens_cleanup_trigger ON auth_tokens;
+      CREATE TRIGGER tokens_cleanup_trigger
+      AFTER INSERT ON auth_tokens
+      EXECUTE FUNCTION delete_old_tokens();
+    `);
+    console.log('Created automatic token cleanup trigger');
+  } catch (err) {
+    console.error('Error setting up database:', err);
+  }
+})();
 
 // Настройка Express
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.use(session({
-  store: sessionStore,
   secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'),
   resave: false,
   saveUninitialized: false,
@@ -89,6 +104,8 @@ ${loginLink}
 
 ⌛ Ссылка действительна 10 минут
     `, { parse_mode: 'HTML' });
+    
+    console.log(`Token generated for @${username}: ${token}`);
   } catch (error) {
     console.error('Ошибка генерации токена:', error);
     bot.sendMessage(chatId, '⚠️ <b>Ошибка генерации ссылки</b>\nПопробуйте позже', { parse_mode: 'HTML' });
@@ -104,7 +121,7 @@ app.get('/', (req, res) => {
 });
 
 app.get('/login', async (req, res) => {
-  const { token } = req.query;
+  let { token } = req.query;
   
   if (!token) {
     return res.status(401).render('error', { 
@@ -113,16 +130,22 @@ app.get('/login', async (req, res) => {
     });
   }
   
+  // Декодируем токен
+  token = decodeURIComponent(token);
+  console.log(`Login attempt with token: ${token}`);
+  
   try {
     // Проверяем токен в базе данных
     const result = await pool.query(
       `DELETE FROM auth_tokens 
        WHERE token = $1 
-       RETURNING username, chat_id, created_at`,
+       AND created_at > NOW() - INTERVAL '10 minutes'
+       RETURNING username, chat_id`,
       [token]
     );
     
     if (result.rows.length === 0) {
+      console.log('Invalid or expired token');
       return res.status(401).render('error', { 
         message: 'Недействительный или просроченный токен',
         session: req.session 
@@ -130,18 +153,12 @@ app.get('/login', async (req, res) => {
     }
     
     const userData = result.rows[0];
-    const tokenAge = (Date.now() - new Date(userData.created_at).getTime()) / 60000;
-    
-    if (tokenAge > 10) {
-      return res.status(401).render('error', { 
-        message: 'Токен просрочен',
-        session: req.session 
-      });
-    }
     
     // Устанавливаем сессию
     req.session.authenticated = true;
     req.session.username = userData.username;
+    
+    console.log(`User authenticated: @${userData.username}`);
     
     // Перенаправляем в профиль
     return res.redirect('/profile');
@@ -170,6 +187,19 @@ app.get('/logout', (req, res) => {
   });
 });
 
+// Для отладки: просмотр всех токенов
+app.get('/debug-tokens', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM auth_tokens');
+    res.json({
+      count: result.rows.length,
+      tokens: result.rows
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.listen(port, async () => {
   console.log(`Сервер запущен на порту ${port}`);
   console.log(`Режим: ${process.env.NODE_ENV || 'development'}`);
@@ -179,6 +209,15 @@ app.listen(port, async () => {
   try {
     await pool.query('SELECT NOW()');
     console.log('PostgreSQL connected successfully');
+    
+    // Проверка таблицы токенов
+    const tableCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_name = 'auth_tokens'
+      )
+    `);
+    console.log('Auth tokens table exists:', tableCheck.rows[0].exists);
   } catch (err) {
     console.error('PostgreSQL connection error:', err);
   }
